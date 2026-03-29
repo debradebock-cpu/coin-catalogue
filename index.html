@@ -255,6 +255,23 @@
         </p>
       </div>
 
+      <div class="modal-sec">
+        <div class="modal-sec-title"><span>Lookup Quality / Cost</span></div>
+        <p style="font-family:'IBM Plex Sans',sans-serif;font-size:.83rem;color:var(--ink-mid);line-height:1.6;margin-bottom:12px">
+          Choose how the AI researches coin values. Balanced uses live web search for current prices. Fast uses training data only — cheaper but prices may be slightly older.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:'IBM Plex Sans',sans-serif;font-size:.85rem;background:var(--parchment-dark);border:1.5px solid var(--border);border-radius:8px;padding:9px 14px;flex:1">
+            <input type="radio" name="modelPref" value="balanced" id="modelBalanced" onchange="saveModelPref(this.value)">
+            <div><strong>⚖ Balanced</strong> — Sonnet + web search<br><span style="font-size:.75rem;color:var(--silver)">~$0.02–0.04 per lookup · Most accurate</span></div>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:'IBM Plex Sans',sans-serif;font-size:.85rem;background:var(--parchment-dark);border:1.5px solid var(--border);border-radius:8px;padding:9px 14px;flex:1">
+            <input type="radio" name="modelPref" value="fast" id="modelFast" onchange="saveModelPref(this.value)">
+            <div><strong>⚡ Fast &amp; Cheap</strong> — Haiku, no web search<br><span style="font-size:.75rem;color:var(--silver)">~$0.001–0.003 per lookup · ~10x cheaper</span></div>
+          </label>
+        </div>
+      </div>
+
       <div class="modal-sec" style="margin-bottom:0">
         <div class="modal-sec-title"><span>About</span></div>
         <p style="font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--silver);line-height:1.7">
@@ -776,7 +793,12 @@ METAL_COMPOSITION:
 [Metal % breakdown, e.g. "80% Silver, 20% Copper"]
 
 MARKET_VALUE_CAD:
-[CAD range for ONE individual coin, e.g. "$15-$45 CAD". CRITICAL: if a source prices a roll (e.g. 50 coins for $25), divide by the roll quantity to get the per-coin price — do NOT use the roll price as a single coin price. Use PCGS/NGC/Charlton/CCRS/coinsandcanada.com. No eBay. For silver/gold coins, use melt value as the minimum floor if collector data is scarce.]
+[CAD range for ONE individual coin, e.g. "$5-$8 CAD". Follow this priority order:
+1. FIRST use actual collector/dealer prices from coinsandcanada.com, Charlton Standard Catalogue, CCRS, PCGS, NGC, or Numista for the specific grade listed.
+2. ONLY use melt value as a floor if NO collector pricing exists — melt value is a last resort, not a substitute for real market data.
+3. If a source prices a roll (e.g. 50 coins for $25), divide by roll quantity for per-coin price.
+4. No eBay. Do not average melt value with collector prices — use the higher collector price.
+The melt value is a MINIMUM, not the answer. A coin worth $5-$6 in collector guides should be listed as $5-$6, not $2.65.]
 
 VALUE_FACTORS:
 [2-3 sentences: rarity, grade sensitivity, variety premium if applicable. If roll pricing was found, state the per-coin equivalent.]
@@ -793,8 +815,16 @@ List 2-4 sources.]`;
 }
 
 // ── SETTINGS MODAL ───────────────────────────────────────────────────────
+function saveModelPref(val) {
+  localStorage.setItem('coinCatModel', val);
+}
+
 function openSettings() {
   updateApiKeyStatus();
+  // Set radio button to current preference
+  const pref = localStorage.getItem('coinCatModel') || 'balanced';
+  const radio = document.getElementById('model' + (pref === 'fast' ? 'Fast' : 'Balanced'));
+  if (radio) radio.checked = true;
   document.getElementById('settingsOverlay').classList.add('open');
 }
 function closeSettings(e) {
@@ -862,15 +892,21 @@ async function apiCall(prompt) {
     headers['anthropic-dangerous-direct-browser-access'] = 'true';
   }
 
+  const modelPref = localStorage.getItem('coinCatModel') || 'balanced';
+  // Model selection: fast/cheap = Haiku (no web search), balanced = Sonnet with search
+  const model = modelPref === 'fast' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514';
+  const useSearch = modelPref !== 'fast';
+  const body = {
+    model,
+    max_tokens: modelPref === 'fast' ? 500 : 800,
+    messages: [{ role: 'user', content: prompt }]
+  };
+  if (useSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: prompt }]
-    })
+    body: JSON.stringify(body)
   });
 
   const data = await res.json();
