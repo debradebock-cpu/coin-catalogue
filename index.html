@@ -653,6 +653,8 @@ function flag(c){return({'Canada':'🍁','USA':'🇺🇸','UK':'🇬🇧','Austr
 // ── COIN DATA NORMALISATION ──────────────────────────────────────────────
 // Ensures a coin object has correct types — call after loading from any source
 function normaliseCoin(c) {
+  // id must always be a string (Google Sheets returns it as a number)
+  if (typeof c.id !== 'string') c.id = String(c.id);
   // sources must be an array
   if (!Array.isArray(c.sources)) {
     try { c.sources = JSON.parse(c.sources || '[]'); } catch(e) { c.sources = []; }
@@ -1608,6 +1610,7 @@ function showGradeInfo(panelId, grade) {
 // ── INIT ──────────────────────────────────────────────────────────────────
 // Backfill valueLow/valueHigh for coins saved before range parsing was added
 coins.forEach(c=>{
+  if(typeof c.id !== 'string') c.id = String(c.id);
   if(typeof c.valueLow!=='number'&&c.marketValue){
     const {low,high}=parseValueRange(c.marketValue);
     c.valueLow=low; c.valueHigh=high;
@@ -1647,6 +1650,10 @@ if (savedSyncUrl) {
   setSyncStatus('URL loaded — ready to sync' + lastSyncStr, 'info');
 }
 // Sync buttons use onclick attributes — see HTML
+
+// Ensure modals are closed on load (safety net)
+document.getElementById('settingsOverlay').classList.remove('open');
+document.getElementById('modalOverlay').classList.remove('open');
 </script>
 </body>
 </html>
