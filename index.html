@@ -650,6 +650,23 @@ function esc(s){return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&l
 function gradeClass(g){if(!g)return'';if(g.includes('Mint State')||g.includes('Proof'))return'ms';if(g.includes('Uncirculated')||g.includes('AU'))return'au';if(g.includes('Extremely')||g.includes('Very Fine'))return'ef';return'';}
 function flag(c){return({'Canada':'🍁','USA':'🇺🇸','UK':'🇬🇧','Australia':'🇦🇺','France':'🇫🇷','Germany':'🇩🇪','Mexico':'🇲🇽','China':'🇨🇳','Japan':'🇯🇵','India':'🇮🇳','Russia':'🇷🇺','Italy':'🇮🇹','Spain':'🇪🇸','Netherlands':'🇳🇱','Switzerland':'🇨🇭','Austria':'🇦🇹','New Zealand':'🇳🇿','South Africa':'🇿🇦','Brazil':'🇧🇷','Argentina':'🇦🇷','Israel':'🇮🇱','Egypt':'🇪🇬','Ireland':'🇮🇪','Sweden':'🇸🇪','Norway':'🇳🇴','Denmark':'🇩🇰','Portugal':'🇵🇹'}[c])||'🌐';}
 
+// ── COIN DATA NORMALISATION ──────────────────────────────────────────────
+// Ensures a coin object has correct types — call after loading from any source
+function normaliseCoin(c) {
+  // sources must be an array
+  if (!Array.isArray(c.sources)) {
+    try { c.sources = JSON.parse(c.sources || '[]'); } catch(e) { c.sources = []; }
+    if (!Array.isArray(c.sources)) c.sources = [];
+  }
+  // photos must be an object
+  if (!c.photos || typeof c.photos !== 'object' || Array.isArray(c.photos)) c.photos = {};
+  // numeric fields
+  if (typeof c.qty !== 'number') c.qty = parseInt(c.qty) || 1;
+  if (c.valueLow !== null && typeof c.valueLow !== 'number') c.valueLow = parseFloat(c.valueLow) || null;
+  if (c.valueHigh !== null && typeof c.valueHigh !== 'number') c.valueHigh = parseFloat(c.valueHigh) || null;
+  return c;
+}
+
 // ── VALUE PARSING ─────────────────────────────────────────────────────────
 function parseValueRange(raw) {
   if (!raw) return {low:null,high:null};
@@ -1081,7 +1098,7 @@ function openDetail(id) {
 
     ${c.valueFactors?`<div class="modal-sec"><div class="modal-sec-title"><span>Value Factors &amp; Market Context</span></div><div class="vf-box">${esc(c.valueFactors)}</div></div>`:''}
 
-    ${(c.sources&&c.sources.length)?`<div class="modal-sec">
+    ${(Array.isArray(c.sources)&&c.sources.length)?`<div class="modal-sec">
       <div class="modal-sec-title"><span>Authoritative Sources</span></div>
       <div class="src-list">${c.sources.map(s=>`<div class="src-item">
         <span class="src-type">${esc(s.type||'Reference')}</span>
@@ -1219,6 +1236,7 @@ function syncFromSheets() {
     }
     coins = data.coins;
     coins.forEach(c => {
+      normaliseCoin(c);
       if (typeof c.valueLow !== 'number' && c.marketValue) {
         const {low, high} = parseValueRange(c.marketValue);
         c.valueLow = low; c.valueHigh = high;
@@ -1498,6 +1516,7 @@ function loadJsonBackup() {
         if (!confirm('Load ' + loaded.length + ' coins from backup? This will replace your current catalogue.')) return;
         coins = loaded;
         coins.forEach(c => {
+          normaliseCoin(c);
           if (typeof c.valueLow !== 'number' && c.marketValue) {
             const {low, high} = parseValueRange(c.marketValue);
             c.valueLow = low; c.valueHigh = high;
@@ -1607,6 +1626,7 @@ coins.forEach(c=>{
       }
     }
   }
+  normaliseCoin(c);
   if(c.country)ensureCountryOption(c.country);
   if(c.collection)ensureCollectionOption(c.collection);
 });
