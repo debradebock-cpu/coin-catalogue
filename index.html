@@ -756,15 +756,20 @@ METAL_COMPOSITION:
 [Metal % breakdown, e.g. "80% Silver, 20% Copper"]
 
 MARKET_VALUE_CAD:
-[CAD range, e.g. "$15-$45". Use PCGS/NGC/Charlton/CCRS/coinsandcanada.com. No eBay. If collector pricing is scarce, calculate and use the silver/gold melt value as the minimum floor and state the range as "~$X (melt) – $Y CAD". Never write "Insufficient data" for silver or gold coins — the melt value is always a valid floor.]
+[CAD range for ONE individual coin, e.g. "$15-$45 CAD". CRITICAL: if a source prices a roll (e.g. 50 coins for $25), divide by the roll quantity to get the per-coin price — do NOT use the roll price as a single coin price. Use PCGS/NGC/Charlton/CCRS/coinsandcanada.com. No eBay. For silver/gold coins, use melt value as the minimum floor if collector data is scarce.]
 
 VALUE_FACTORS:
-[2-3 sentences: rarity, grade sensitivity, variety premium if applicable.]
+[2-3 sentences: rarity, grade sensitivity, variety premium if applicable. If roll pricing was found, state the per-coin equivalent.]
 
 CONFIDENCE: [High/Medium/Low — one sentence.]
 
 SOURCES:
-[NAME | URL | TYPE — 2-4 sources]`;
+[List each source on its own line in EXACTLY this format — pipe-separated, no bullets, no numbers:
+NAME | URL | TYPE
+Example:
+CCRS Canadian Coin Reference | https://www.ccrs.net | Price Guide
+Charlton Standard Catalogue | https://www.charltonpress.com | Catalogue
+List 2-4 sources.]`;
 }
 
 // ── SETTINGS MODAL ───────────────────────────────────────────────────────
@@ -895,7 +900,14 @@ function parseResponse(text) {
   const confRaw=sec('CONFIDENCE',['SOURCES']);
   const conf=(confRaw.split('\n').map(l=>l.trim()).filter(l=>l)[0])||'';
   const srcRaw=sec('SOURCES',[]);
-  const sources=srcRaw.split('\n').filter(l=>l.includes('|')).map(l=>{const p=l.split('|').map(x=>x.trim());return{name:p[0],url:p[1],type:p[2]};}).filter(s=>s.name);
+  const sources=srcRaw.split('\n')
+    .map(l => l.replace(/^[\d\-\*\.\)]+\s*/, '').trim()) // strip bullets/numbers
+    .filter(l => l.includes('|'))
+    .map(l => {
+      const p = l.split('|').map(x => x.trim());
+      return { name: p[0], url: p[1] || '', type: p[2] || 'Reference' };
+    })
+    .filter(s => s.name && s.name.length > 1);
   return {metalComposition:metal,marketValue:val,valueLow:low,valueHigh:high,valueFactors:factors,confidence:conf,sources,rawText:text};
 }
 
@@ -1069,13 +1081,16 @@ function openDetail(id) {
 
     ${c.valueFactors?`<div class="modal-sec"><div class="modal-sec-title"><span>Value Factors &amp; Market Context</span></div><div class="vf-box">${esc(c.valueFactors)}</div></div>`:''}
 
-    ${c.sources&&c.sources.length?`<div class="modal-sec">
+    ${(c.sources&&c.sources.length)?`<div class="modal-sec">
       <div class="modal-sec-title"><span>Authoritative Sources</span></div>
       <div class="src-list">${c.sources.map(s=>`<div class="src-item">
         <span class="src-type">${esc(s.type||'Reference')}</span>
-        <a href="${esc(s.url||'#')}" target="_blank" rel="noopener">${esc(s.name)}</a>
-        ${s.url&&s.url!=='#'?`<a href="${esc(s.url)}" target="_blank" rel="noopener" style="color:var(--silver);font-size:.78rem">↗</a>`:''}
+        <a href="${(s.url&&s.url!=='#')?esc(s.url):'#'}" target="_blank" rel="noopener">${esc(s.name)}</a>
+        ${(s.url&&s.url!=='#'&&s.url.startsWith('http'))?`<a href="${esc(s.url)}" target="_blank" rel="noopener" style="color:var(--silver);font-size:.78rem">↗</a>`:''}
       </div>`).join('')}</div>
+    </div>`:c.rawText&&c.rawText.includes('|')?`<div class="modal-sec">
+      <div class="modal-sec-title"><span>Authoritative Sources</span><span style="font-size:.6rem;color:var(--silver)">(re-run lookup to reformat)</span></div>
+      <div class="vf-box" style="font-family:IBM Plex Mono,monospace;font-size:.75rem">${esc(c.rawText.split('SOURCES:').pop().trim().substring(0,400))}</div>
     </div>`:''}
 
     <div class="modal-sec">
@@ -1166,7 +1181,7 @@ async function syncToSheets() {
   document.getElementById('pushSpinner').style.display = 'none';
 }
 
-async function syncFromSheets() {
+function syncFromSheets() {
   const url = getSyncUrl();
   if (!url) { alert('Please paste your Google Apps Script Web App URL first.'); return; }
   const btn = document.getElementById('btnPull');
@@ -1174,26 +1189,33 @@ async function syncFromSheets() {
   document.getElementById('pullSpinner').style.display = 'inline-block';
   setSyncStatus('Loading from Google Sheets…', 'info');
 
-  try {
-    // Apps Script deployed as "Anyone" returns JSON with CORS headers on GET requests
-    const resp = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' — check the Web App URL and that access is set to "Anyone"');
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+  // JSONP bypasses CORS entirely — works from any origin including https://
+  const cbName = '_gsCb_' + Date.now();
+  const script = document.createElement('script');
+
+  const timer = setTimeout(() => {
+    cleanup();
+    setSyncStatus('Error: Timed out. Check your Web App URL is deployed as "Anyone".', 'err');
+    btn.disabled = false;
+    document.getElementById('pullSpinner').style.display = 'none';
+  }, 20000);
+
+  function cleanup() {
+    clearTimeout(timer);
+    delete window[cbName];
+    if (script.parentNode) script.parentNode.removeChild(script);
+  }
+
+  window[cbName] = function(data) {
+    cleanup();
+    btn.disabled = false;
+    document.getElementById('pullSpinner').style.display = 'none';
+    if (data.error) { setSyncStatus('Error: ' + data.error, 'err'); return; }
     if (!data.coins || !data.coins.length) {
-      setSyncStatus('Sheet is empty — nothing to load', 'info');
-      btn.disabled = false;
-      document.getElementById('pullSpinner').style.display = 'none';
-      return;
+      setSyncStatus('Sheet is empty — nothing to load', 'info'); return;
     }
-    if (!confirm('Load ' + data.coins.length + ' coins from Google Sheets? This will replace your current local catalogue.')) {
-      setSyncStatus('Load cancelled', 'info');
-      btn.disabled = false;
-      document.getElementById('pullSpinner').style.display = 'none';
-      return;
+    if (!confirm('Load ' + data.coins.length + ' coins from Google Sheets? This will replace your current catalogue.')) {
+      setSyncStatus('Load cancelled', 'info'); return;
     }
     coins = data.coins;
     coins.forEach(c => {
@@ -1208,11 +1230,19 @@ async function syncFromSheets() {
     updateHeader(); rebuildFilters(); renderTable(); updateQueueBtn();
     setSyncStatus('✓ Loaded ' + data.coins.length + ' coins from Google Sheets', 'ok');
     localStorage.setItem('coinCatLastSync', new Date().toISOString());
-  } catch(e) {
-    setSyncStatus('Error: ' + e.message, 'err');
-  }
-  btn.disabled = false;
-  document.getElementById('pullSpinner').style.display = 'none';
+  };
+
+  script.onerror = function() {
+    cleanup();
+    setSyncStatus('Error: Could not reach Apps Script URL. Check deployment settings.', 'err');
+    btn.disabled = false;
+    document.getElementById('pullSpinner').style.display = 'none';
+  };
+
+  // Append callback param to URL
+  const sep = url.includes('?') ? '&' : '?';
+  script.src = url + sep + 'callback=' + cbName;
+  document.head.appendChild(script);
 }
 
 // ── AUTO-RESEARCH QUEUE ──────────────────────────────────────────────────
