@@ -630,7 +630,7 @@ function renderTable() {
       <td>
         <span class="status-dot ${hasData?'dot-ok':'dot-pending'}"></span>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:.64rem;color:var(--silver)">${hasData?'Researched':'Needs Lookup'}</span>
-        ${Object.keys(c.photos||{}).length>0?`<span title="${Object.keys(c.photos).length} photo(s)" style="margin-left:5px;font-size:.8rem;opacity:.7">📷</span>`:''}
+        ${Object.keys(c.photos||{}).length>0?`<span title="${Object.keys(c.photos||{}).length} photo(s)" style="margin-left:5px;font-size:.8rem;opacity:.7">📷</span>`:''}
       </td>
       <td class="action-cell" onclick="event.stopPropagation()">
         <button class="btn-refresh" id="rbtn-${c.id}" onclick="refreshCoin('${c.id}')">↻</button>
@@ -901,7 +901,7 @@ function parseResponse(text) {
   const conf=(confRaw.split('\n').map(l=>l.trim()).filter(l=>l)[0])||'';
   const srcRaw=sec('SOURCES',[]);
   const sources=srcRaw.split('\n')
-    .map(l => l.replace(/^[\d\-\*\.\)]+\s*/, '').trim()) // strip bullets/numbers
+    .map(l => l.replace(/^[\d\*\.\)\-]+\s*/, '').trim()) // strip bullets/numbers
     .filter(l => l.includes('|'))
     .map(l => {
       const p = l.split('|').map(x => x.trim());
