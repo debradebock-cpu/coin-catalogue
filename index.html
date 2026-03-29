@@ -793,12 +793,14 @@ METAL_COMPOSITION:
 [Metal % breakdown, e.g. "80% Silver, 20% Copper"]
 
 MARKET_VALUE_CAD:
-[CAD range for ONE individual coin, e.g. "$5-$8 CAD". Follow this priority order:
-1. FIRST use actual collector/dealer prices from coinsandcanada.com, Charlton Standard Catalogue, CCRS, PCGS, NGC, or Numista for the specific grade listed.
-2. ONLY use melt value as a floor if NO collector pricing exists — melt value is a last resort, not a substitute for real market data.
-3. If a source prices a roll (e.g. 50 coins for $25), divide by roll quantity for per-coin price.
-4. No eBay. Do not average melt value with collector prices — use the higher collector price.
-The melt value is a MINIMUM, not the answer. A coin worth $5-$6 in collector guides should be listed as $5-$6, not $2.65.]
+[CAD range for ONE individual coin, e.g. "$5-$8 CAD". Follow this exact logic:
+1. Find the collector/dealer price for this specific grade from coinsandcanada.com, Charlton, CCRS, PCGS, NGC, or Numista.
+2. Calculate the current silver or gold melt value in CAD if the coin contains precious metal.
+3. REPORT WHICHEVER IS HIGHER — melt value or collector value. Never report a value below melt value.
+   Example: collector price $11, melt value $37 → report $37-$40 CAD (melt floor).
+   Example: collector price $25, melt value $8 → report $25-$30 CAD (collector price).
+4. If a source prices a roll (e.g. 50 coins for $25), divide by roll quantity for per-coin price.
+5. No eBay. State clearly which value (melt or collector) is driving the range.]
 
 VALUE_FACTORS:
 [2-3 sentences: rarity, grade sensitivity, variety premium if applicable. If roll pricing was found, state the per-coin equivalent.]
