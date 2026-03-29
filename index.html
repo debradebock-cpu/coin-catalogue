@@ -616,7 +616,7 @@ function renderTable() {
     const highFmt = typeof c.valueHigh==='number' ? '$'+c.valueHigh.toLocaleString('en-CA',{minimumFractionDigits:0,maximumFractionDigits:0}) : null;
     const rangeFmt = lowFmt && highFmt ? (c.valueLow===c.valueHigh?lowFmt:lowFmt+' – '+highFmt) : null;
     return `<tr onclick="openDetail('${c.id}')" title="Click to view/edit details">
-      <td style="font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--silver)">${i+1}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;font-weight:600;color:var(--copper)">${c.catalogueId||'—'}</td>
       <td>${c.collection?`<span class="coll-tag">${esc(c.collection)}</span>`:'<span style="color:var(--silver)">—</span>'}</td>
       <td>${flag(c.country)}&nbsp;${esc(c.country)||'<span style="color:var(--silver)">—</span>'}</td>
       <td><div class="coin-name">${esc(c.name)||'—'}</div>${c.variety?`<div class="coin-sub">${esc(c.variety)}</div>`:''}</td>
@@ -655,6 +655,7 @@ function flag(c){return({'Canada':'🍁','USA':'🇺🇸','UK':'🇬🇧','Austr
 function normaliseCoin(c) {
   // id must always be a string (Google Sheets returns it as a number)
   if (typeof c.id !== 'string') c.id = String(c.id);
+  // catalogueId backfill — assigned properly in init loop
   // sources must be an array
   if (!Array.isArray(c.sources)) {
     try { c.sources = JSON.parse(c.sources || '[]'); } catch(e) { c.sources = []; }
@@ -962,8 +963,12 @@ function addCoin() {
   if (!d.name){alert('Please enter a denomination/name.');return;}
   ensureCountryOption(d.country);
   ensureCollectionOption(d.collection);
+  const nextNum = coins.length > 0
+    ? Math.max(...coins.map(c => parseInt((c.catalogueId||'C-000').replace('C-',''))||0)) + 1
+    : 1;
+  const catalogueId = 'C-' + String(nextNum).padStart(3,'0');
   const coin={
-    id:Date.now().toString(), ...d,
+    id:Date.now().toString(), ...d, catalogueId,
     metalComposition:pendingLookup.metalComposition||'',
     marketValue:pendingLookup.marketValue||'',
     valueLow:pendingLookup.valueLow??null,
@@ -1033,7 +1038,7 @@ function openDetail(id) {
   const c=coins.find(x=>x.id===id); if(!c)return;
   activeCoinId=id;
   document.getElementById('mTitle').textContent=`${c.name||'Coin'} ${c.year||''}`;
-  document.getElementById('mSub').textContent=`${flag(c.country)} ${c.country||'Unknown'}${c.mint?' · Mint: '+c.mint:''}${c.variety?' · '+c.variety:''}`;
+  document.getElementById('mSub').textContent=`${c.catalogueId||''} · ${flag(c.country)} ${c.country||'Unknown'}${c.mint?' · Mint: '+c.mint:''}${c.variety?' · '+c.variety:''}`;
   const confKey=(c.confidence||'').match(/^(High|Medium|Low)/i)?.[0]||'M';
   const confClass={High:'conf-H',Medium:'conf-M',Low:'conf-L'}[confKey]||'conf-M';
   const fmtDate=dt=>dt?new Date(dt).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}):'Never';
@@ -1541,9 +1546,9 @@ function loadJsonBackup() {
 
 function exportCSV() {
   if(!coins.length){alert('No coins to export.');return;}
-  const hdr=['#','Collection','Country','Name','Year','Mint','Grade','Qty','Variety','Metal Composition','Market Value (CAD)','Est. Low (CAD)','Est. High (CAD)','Value Factors','Confidence','Sources','Condition Notes','Notes','Date Added','Last Researched'];
+  const hdr=['ID','#','Collection','Country','Name','Year','Mint','Grade','Qty','Variety','Metal Composition','Market Value (CAD)','Est. Low (CAD)','Est. High (CAD)','Value Factors','Confidence','Sources','Condition Notes','Notes','Date Added','Last Researched'];
   const rows=coins.map((c,i)=>[
-    i+1,c.collection,c.country,c.name,c.year,c.mint,c.grade,c.qty,c.variety,
+    c.catalogueId||'',i+1,c.collection,c.country,c.name,c.year,c.mint,c.grade,c.qty,c.variety,
     c.metalComposition,c.marketValue,c.valueLow,c.valueHigh,c.valueFactors,c.confidence,
     (c.sources||[]).map(s=>s.name+(s.url?' ('+s.url+')':'')).join('; '),
     c.condNote,c.notes,c.addedAt,c.updatedAt
@@ -1609,6 +1614,21 @@ function showGradeInfo(panelId, grade) {
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 // Backfill valueLow/valueHigh for coins saved before range parsing was added
+// Assign catalogueIds to any coins that don't have one yet
+let _maxCatNum = 0;
+coins.forEach(c => {
+  if (c.catalogueId) {
+    const n = parseInt(c.catalogueId.replace('C-','')) || 0;
+    if (n > _maxCatNum) _maxCatNum = n;
+  }
+});
+coins.forEach((c, i) => {
+  if (!c.catalogueId) {
+    _maxCatNum++;
+    c.catalogueId = 'C-' + String(_maxCatNum).padStart(3,'0');
+  }
+});
+
 coins.forEach(c=>{
   if(typeof c.id !== 'string') c.id = String(c.id);
   if(typeof c.valueLow!=='number'&&c.marketValue){
