@@ -386,6 +386,10 @@
         <span id="lookupSpinner" style="display:none" class="spinner"></span>
         🔍 AI Lookup: Market Value &amp; Metal
       </button>
+      <button class="btn-ai" id="btnValueLookup" onclick="lookupCoinValueOnly()" style="background:linear-gradient(135deg,#1a2c1a,#2E7D32);border-color:#2E7D32;color:#a5d6a7">
+        <span id="valueLookupSpinner" style="display:none" class="spinner"></span>
+        💰 Value Only
+      </button>
       <button class="btn-primary" onclick="addCoin()">Add to Catalogue</button>
       <button class="btn-secondary" onclick="clearForm()">Clear</button>
     </div>
@@ -440,6 +444,7 @@
   <div class="toolbar-row2">
     <button class="export-btn" onclick="exportCSV()">📥 Export CSV</button>
     <button class="btn-queue" id="btnAutoResearch" onclick="startQueue()">▶ Auto-Research Pending</button>
+    <button class="btn-queue" id="btnRefreshValues" onclick="startRefreshValuesQueue()" style="background:linear-gradient(135deg,#1a2c1a,#2E7D32);border-color:#2E7D32;color:#a5d6a7">💰 Refresh Values</button>
   </div>
 
   <!-- AUTO-RESEARCH QUEUE BAR -->
@@ -816,6 +821,43 @@ Charlton Standard Catalogue | https://www.charltonpress.com | Catalogue
 List 2-4 sources.]`;
 }
 
+// ── VALUE-ONLY PROMPT (cheaper — skips metal composition) ────────────────
+function makeValuePrompt(coin) {
+  const parts = [
+    coin.country || 'Unknown',
+    coin.name,
+    coin.year,
+    coin.mint ? 'Mint:' + coin.mint : '',
+    coin.grade ? 'Grade:' + coin.grade : '',
+    coin.variety ? 'Variety:' + coin.variety : '',
+    coin.notes ? 'Notes:' + coin.notes : '',
+  ].filter(Boolean).join(' | ');
+
+  const notesLower = ((coin.notes||'') + ' ' + (coin.variety||'')).toLowerCase();
+  const hasVariety = notesLower.match(/missing dot|double die|error|pattern|specimen|re-engraved|scarce|rare|key date/i);
+  const varietyNote = hasVariety ? `
+IMPORTANT: Notes mention "${hasVariety[0]}" — price this specific variety.` : '';
+
+  return `Numismatist: give current market value for this coin. Reply ONLY in this format. No preamble.${varietyNote}
+
+COIN: ${parts}
+
+MARKET_VALUE_CAD:
+[CAD range for ONE individual coin. Follow this exact logic:
+1. Find collector/dealer price for this grade from coinsandcanada.com, Charlton, CCRS, PCGS, NGC, or Numista.
+2. Calculate melt value in CAD if silver/gold.
+3. Report whichever is HIGHER — melt or collector. Never report below melt.
+4. If roll pricing found, divide by roll quantity. No eBay.]
+
+VALUE_FACTORS:
+[1-2 sentences: what's driving the value — collector premium or melt floor, and grade sensitivity.]
+
+CONFIDENCE: [High/Medium/Low — one sentence.]
+
+SOURCES:
+[NAME | URL | TYPE — 2-3 sources, pipe-separated, no bullets]`;
+}
+
 // ── SETTINGS MODAL ───────────────────────────────────────────────────────
 function saveModelPref(val) {
   localStorage.setItem('coinCatModel', val);
@@ -992,6 +1034,44 @@ async function lookupCoin() {
     pendingLookup={};
   }
   document.getElementById('lookupSpinner').style.display='none';
+  document.getElementById('btnLookup').disabled=false;
+}
+
+// ── VALUE-ONLY LOOKUP (from add form) ────────────────────────────────────
+async function lookupCoinValueOnly() {
+  const d=formData();
+  if (!d.name||!d.year){alert('Please enter at least a denomination/name and year.');return;}
+  document.getElementById('btnValueLookup').disabled=true;
+  document.getElementById('btnLookup').disabled=true;
+  document.getElementById('valueLookupSpinner').style.display='inline-block';
+  const panel=document.getElementById('aiResult'); panel.classList.add('show');
+  document.getElementById('aiSpinner').style.display='inline-block';
+  document.getElementById('aiResultTitle').textContent='Researching value…';
+  document.getElementById('aiResultBody').textContent='Looking up market prices…';
+  try {
+    const text=await apiCall(makeValuePrompt(d));
+    const parsed=parseResponse(text);
+    // Keep any existing metal composition from a prior full lookup
+    pendingLookup={
+      ...pendingLookup,
+      marketValue:parsed.marketValue||'',
+      valueLow:parsed.valueLow??null,
+      valueHigh:parsed.valueHigh??null,
+      valueFactors:parsed.valueFactors||'',
+      confidence:parsed.confidence||'',
+      sources:parsed.sources||[],
+      rawText:text,
+    };
+    document.getElementById('aiSpinner').style.display='none';
+    document.getElementById('aiResultTitle').textContent='✅ Value research complete — click "Add to Catalogue"';
+    document.getElementById('aiResultBody').textContent=text;
+  } catch(e) {
+    document.getElementById('aiSpinner').style.display='none';
+    document.getElementById('aiResultTitle').textContent='⚠️ Error: '+e.message;
+    document.getElementById('aiResultBody').textContent='You can still add the coin and look it up later.';
+  }
+  document.getElementById('valueLookupSpinner').style.display='none';
+  document.getElementById('btnValueLookup').disabled=false;
   document.getElementById('btnLookup').disabled=false;
 }
 
@@ -1448,6 +1528,89 @@ function stopQueue() {
   queueShouldStop = true;
   document.getElementById('btnQueueStop').disabled = true;
   queueLog('Stop requested — finishing current lookup…', 'warn');
+}
+
+// ── REFRESH VALUES QUEUE — re-prices already-researched coins only ────────
+async function startRefreshValuesQueue() {
+  const researched = coins.filter(c => c.metalComposition || c.marketValue);
+  if (!researched.length) { alert('No researched coins to refresh.'); return; }
+  if (!confirm('Refresh market values for ' + researched.length + ' researched coin(s)? This uses a shorter, cheaper prompt that updates prices without re-checking metal composition.')) return;
+  if (queueRunning) return;
+
+  queueRunning = true;
+  queueShouldStop = false;
+  document.getElementById('queueBar').classList.add('active');
+  document.getElementById('queueLog').innerHTML = '';
+  document.getElementById('btnQueueStop').disabled = false;
+  document.getElementById('btnRefreshValues').disabled = true;
+  updateQueueBtn();
+  setQueueProgress(0, researched.length);
+  queueLog(`Refreshing values for ${researched.length} coin(s) · value-only prompt · ${QUEUE_DELAY_MS/1000}s delay`, 'info');
+
+  let done = 0, errors = 0, rateLimitHits = 0;
+
+  for (let i = 0; i < researched.length; i++) {
+    if (queueShouldStop) { queueLog('Queue stopped by user.', 'warn'); break; }
+
+    const coin = researched[i];
+    const label = `${coin.catalogueId||''} ${coin.name||'?'} ${coin.year||''}${coin.country?' ('+coin.country+')':''}`.trim();
+    setQueueSub(`Refreshing ${i+1} of ${researched.length}: ${label}`);
+    queueLog(`<span class="queue-coin-name">${label}</span> — refreshing value…`, 'info');
+
+    let attempts = 0;
+    while (attempts < 3 && !queueShouldStop) {
+      attempts++;
+      try {
+        const text = await apiCall(makeValuePrompt(coin));
+        const p = parseResponse(text);
+        if (p.marketValue) coin.marketValue = p.marketValue;
+        if (typeof p.valueLow === 'number') coin.valueLow = p.valueLow;
+        if (typeof p.valueHigh === 'number') coin.valueHigh = p.valueHigh;
+        if (p.valueFactors) coin.valueFactors = p.valueFactors;
+        if (p.confidence) coin.confidence = p.confidence;
+        if (p.sources && p.sources.length) coin.sources = p.sources;
+        coin.rawText = text;
+        coin.updatedAt = new Date().toISOString();
+        persist();
+        const valStr = coin.marketValue ? ` · ${coin.marketValue}` : '';
+        queueLog(`<span class="queue-coin-name">${label}</span> ✓${valStr}`, 'ok');
+        done++; break;
+      } catch(e) {
+        const isRateLimit = e.message && (e.message.includes('rate limit') || e.message.includes('529'));
+        if (isRateLimit && attempts < 3) {
+          rateLimitHits++;
+          const wait = 30 * attempts;
+          queueLog(`Rate limit — waiting ${wait}s…`, 'warn');
+          for (let w = 0; w < wait; w++) {
+            if (queueShouldStop) break;
+            setQueueSub(`Rate limited — retrying in ${wait-w}s…`);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        } else {
+          queueLog(`<span class="queue-coin-name">${label}</span> ✗ ${e.message}`, 'err');
+          errors++; break;
+        }
+      }
+    }
+
+    setQueueProgress(i + 1, researched.length);
+    if (i < researched.length - 1 && !queueShouldStop) {
+      for (let d = 0; d < Math.floor(QUEUE_DELAY_MS/1000); d++) {
+        if (queueShouldStop) break;
+        setQueueSub(`Done ${i+1}/${researched.length} · Next in ${Math.floor(QUEUE_DELAY_MS/1000)-d}s`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  queueRunning = false;
+  document.getElementById('btnRefreshValues').disabled = false;
+  updateQueueBtn();
+  const summary = `Values refreshed — ${done} updated, ${errors} errors${rateLimitHits?' ('+rateLimitHits+' rate limit retries)':''}`;
+  setQueueSub(summary);
+  queueLog(summary, done > 0 ? 'ok' : 'warn');
+  setQueueProgress(researched.length, researched.length);
+  document.getElementById('btnQueueStop').disabled = true;
 }
 
 // ── COIN PHOTOS ──────────────────────────────────────────────────────────
